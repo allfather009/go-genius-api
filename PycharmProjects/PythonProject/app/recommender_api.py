@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 # Load API keys from .env file
 load_dotenv()
 GEOAPIFY_API_KEY = os.environ.get("779636eb19fb429fb577544f0a40d322")
-AMADEUS_CLIENT_ID = os.getenv("iDryAsA3DgdzaKw6F73vGEUsG7mXh6xn")
-AMADEUS_CLIENT_SECRET = os.getenv("wZor45KeeG39sW57")
+AMADEUS_CLIENT_ID = os.environ.get("iDryAsA3DgdzaKw6F73vGEUsG7mXh6xn")
+AMADEUS_CLIENT_SECRET = os.environ.get("wZor45KeeG39sW57")
 
 # Initialize FastAPI app
 app = FastAPI(
