@@ -64,7 +64,7 @@ def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
     url = "https://api.geoapify.com/v2/places"
     # TEMP: use a valid fixed filter (bounding box around New York City)
     params = {
-        "categories": "entertainment,sightseeing,accommodation",
+        "categories": "entertainment.culture,tourism.attraction,accommodation.hotel",
         "filter": "rect:-74.2591,40.4774,-73.7002,40.9176",  # NYC bounding box
         "limit": limit,
         "apiKey": GEOAPIFY_API_KEY
