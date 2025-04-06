@@ -14,7 +14,7 @@ import os
 load_dotenv()  # ✅ This loads from .env file
 
 GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY")
-print("🔑 Loaded GEOAPIFY_API_KEY:", GEOAPIFY_API_KEY)
+#print("🔑 Loaded GEOAPIFY_API_KEY:", GEOAPIFY_API_KEY)
 
 AMADEUS_CLIENT_ID = os.environ.get("AMADEUS_CLIENT_ID")
 AMADEUS_CLIENT_SECRET = os.environ.get("AMADEUS_CLIENT_SECRET")
