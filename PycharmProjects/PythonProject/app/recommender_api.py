@@ -60,15 +60,16 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
 
 def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
     url = "https://api.geoapify.com/v2/places"
+    # TEMP: use a valid fixed filter (bounding box around New York City)
     params = {
-        "categories": user_tags.replace(" ", ","),
-        "filter": "countrycode:us",
+        "categories": "entertainment,sightseeing,accommodation",
+        "filter": "rect:-74.2591,40.4774,-73.7002,40.9176",  # NYC bounding box
         "limit": limit,
         "apiKey": GEOAPIFY_API_KEY
     }
     res = requests.get(url, params=params)
     if res.status_code != 200:
-        raise HTTPException(status_code=500, detail="Geoapify API request failed.")
+        raise HTTPException(status_code=500, detail=f"Geoapify API request failed. {res.text}")
 
     features = res.json().get("features", [])
     data = []
