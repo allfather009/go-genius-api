@@ -10,6 +10,8 @@ import numpy as np
 import requests
 from dotenv import load_dotenv
 import os
+from fastapi.middleware.cors import CORSMiddleware
+
 
 load_dotenv()  # ✅ This loads from .env file
 
@@ -26,6 +28,14 @@ app = FastAPI(
     description="Recommends destinations using real-time data from Geoapify and Amadeus APIs based on user preferences",
     version="3.1.0"
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # You can change * to specific domain later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ========================== MODELS ==============================
 
