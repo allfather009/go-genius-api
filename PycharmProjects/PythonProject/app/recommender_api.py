@@ -105,6 +105,7 @@ def fetch_from_geoapify(preference: UserPreference, limit: int = 25) -> pd.DataF
 
     params = {
         "categories": category_str,
+        "filter": "rect:-74.2591,40.4774,-73.7002,40.9176",  # 🗽 NYC bbox
         "limit": limit,
         "apiKey": GEOAPIFY_API_KEY
     }
@@ -124,6 +125,7 @@ def fetch_from_geoapify(preference: UserPreference, limit: int = 25) -> pd.DataF
                 "tags": category_str
             })
     return pd.DataFrame(data)
+
 
 def fetch_from_amadeus(user_tags: str, limit: int = 25) -> pd.DataFrame:
     token_url = "https://test.api.amadeus.com/v1/security/oauth2/token"
