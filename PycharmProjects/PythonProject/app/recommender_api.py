@@ -12,17 +12,12 @@ from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
 
-
-load_dotenv()  # ✅ This loads from .env file
+load_dotenv()
 
 GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY")
-#print("🔑 Loaded GEOAPIFY_API_KEY:", GEOAPIFY_API_KEY)
-
 AMADEUS_CLIENT_ID = os.environ.get("AMADEUS_CLIENT_ID")
 AMADEUS_CLIENT_SECRET = os.environ.get("AMADEUS_CLIENT_SECRET")
 
-
-# Initialize FastAPI app
 app = FastAPI(
     title="GoGenius Travel Recommender API",
     description="Recommends destinations using real-time data from Geoapify and Amadeus APIs based on user preferences",
@@ -30,14 +25,11 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can change * to specific domain later
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ========================== MODELS ==============================
 
 class UserPreference(BaseModel):
     user_id: str
@@ -58,8 +50,6 @@ class Destination(BaseModel):
     name: str
     tags: str
 
-# ========================== HELPER FUNCTIONS ======================
-
 def convert_preferences_to_tags(pref: UserPreference) -> str:
     tag_fields = (
         pref.travel_style + [pref.duration, pref.budget, pref.climate] +
@@ -70,30 +60,51 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
     clean_tags = [str(tag).replace("_", " ").lower() for tag in tag_fields if tag]
     return " ".join(clean_tags)
 
-def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
-    url = "https://api.geoapify.com/v2/places"
-
-    # Try to extract a keyword from user_tags
-    keyword = user_tags.split()[0] if user_tags else "tourism"
-
-    # Example: Convert keyword to a Geoapify category
-    # You can expand this mapping if needed
-    keyword_to_category = {
-        "beach": "beach",
-        "museum": "entertainment.culture",
-        "hotel": "accommodation.hotel",
-        "mountain": "natural.mountain",
+def get_geoapify_categories(preference: UserPreference) -> str:
+    user_to_geoapify_category = {
+        "adventure": "sport.extreme_sports",
+        "beach/relaxation": "beach",
+        "food & culinary": "catering.restaurant",
+        "nature & hiking": "natural.forest,natural.mountain",
+        "theme parks": "entertainment.theme_park",
+        "cruise": "tourism.boat_rental",
+        "festivals & events": "entertainment.event_venue",
         "shopping": "commercial.shopping_mall",
-        "restaurant": "catering.restaurant",
-        "nature": "natural",
+        "cultural & historical": "entertainment.culture,historic",
+        "arts & museums": "entertainment.culture",
+        "music & nightlife": "entertainment.nightclub",
+        "fitness & wellness": "health.sports_centre",
+        "literature & bookstores": "commercial.bookstore",
+        "wildlife & safari": "natural.reserve",
+        "sports & outdoor activities": "sport",
+        "hotel": "accommodation.hotel",
+        "villa": "accommodation.villa",
+        "camping": "accommodation.campground",
+        "hostel": "accommodation.hostel",
+        "resort": "accommodation.resort",
+        "flight": "transport.airport",
+        "train": "transport.train_station",
+        "road trip": "transport.car_rental",
     }
 
-    category = keyword_to_category.get(keyword, "tourism.attraction")
+    selected_fields = preference.travel_style + preference.accommodation + preference.interests
+    categories = set()
+    for item in selected_fields:
+        mapped = user_to_geoapify_category.get(item.lower())
+        if mapped:
+            for cat in mapped.split(","):
+                categories.add(cat.strip())
 
-    # Instead of a fixed bounding box, use a world-wide search with bias (optional)
+    if not categories:
+        return "tourism.attraction"
+    return ",".join(categories)
+
+def fetch_from_geoapify(preference: UserPreference, limit: int = 25) -> pd.DataFrame:
+    url = "https://api.geoapify.com/v2/places"
+    category_str = get_geoapify_categories(preference)
+
     params = {
-        "categories": category,
-        "bias": "proximity:0,0",  # You can update this with lat/lon if you collect from user
+        "categories": category_str,
         "limit": limit,
         "apiKey": GEOAPIFY_API_KEY
     }
@@ -110,10 +121,9 @@ def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
             data.append({
                 "id": props.get("place_id", "geo_" + str(len(data))),
                 "name": props["name"],
-                "tags": user_tags
+                "tags": category_str
             })
     return pd.DataFrame(data)
-
 
 def fetch_from_amadeus(user_tags: str, limit: int = 25) -> pd.DataFrame:
     token_url = "https://test.api.amadeus.com/v1/security/oauth2/token"
@@ -158,25 +168,13 @@ def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: i
 
 def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
     tags = convert_preferences_to_tags(preference)
-    geoapify_data = fetch_from_geoapify(tags)
+    geoapify_data = fetch_from_geoapify(preference)
     amadeus_data = fetch_from_amadeus(tags)
     combined_data = pd.concat([geoapify_data, amadeus_data], ignore_index=True)
     content_scores = recommend_content_based(tags, combined_data)
     top_indices = content_scores.sort_values(ascending=False).head(top_n).index
     return combined_data.loc[top_indices].to_dict(orient="records")
 
-# ========================== API ROUTES =============================
-
 @app.post("/recommend", response_model=List[Destination])
 def get_recommendations(preference: UserPreference):
-    """
-    Receives user preferences and returns best matching destinations.
-    Combines data from Geoapify and Amadeus APIs.
-    """
     return hybrid_recommendation(preference)
-
-# ========================== EXPLANATION ===========================
-# - OpenTripMap removed by request.
-# - Now using Geoapify and Amadeus APIs to fetch places and cities.
-# - Real-time destinations are fetched, combined, and ranked by AI logic using TF-IDF similarity.
-# - Response contains top N destination matches with ID, name, and tags.
