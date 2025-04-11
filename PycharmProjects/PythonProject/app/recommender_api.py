@@ -167,14 +167,32 @@ def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: i
     return pd.Series(sim_scores, index=destinations.index)
 
 def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
+    print("✅ Converting preferences to tags...")
     tags = convert_preferences_to_tags(preference)
+    print("🎯 Tags:", tags)
+
+    print("🌍 Fetching from Geoapify...")
     geoapify_data = fetch_from_geoapify(preference)
+    print("📦 Geoapify results:", geoapify_data.shape)
+
+    print("✈️ Fetching from Amadeus...")
     amadeus_data = fetch_from_amadeus(tags)
+    print("📦 Amadeus results:", amadeus_data.shape)
+
+    print("🔀 Combining and scoring...")
     combined_data = pd.concat([geoapify_data, amadeus_data], ignore_index=True)
     content_scores = recommend_content_based(tags, combined_data)
     top_indices = content_scores.sort_values(ascending=False).head(top_n).index
+    print("🏆 Final recommendations ready!")
+
     return combined_data.loc[top_indices].to_dict(orient="records")
+
 
 @app.post("/recommend", response_model=List[Destination])
 def get_recommendations(preference: UserPreference):
-    return hybrid_recommendation(preference)
+    try:
+        return hybrid_recommendation(preference)
+    except Exception as e:
+        print("💥 Error:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
