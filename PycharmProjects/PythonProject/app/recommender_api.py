@@ -7,17 +7,19 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 import os
+import requests
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
-STAY22_LETMEALLEZ_ID = os.getenv("STAY22_LETMEALLEZ_ID")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+RAPIDAPI_HOST = "airbnb19.p.rapidapi.com"
 
 app = FastAPI(
     title="GoGenius Travel Recommender API",
-    description="Recommends destinations using Stay22 embedded content and personalized preferences",
-    version="5.1.0"
+    description="Recommends destinations using RapidAPI Airbnb data and personalized preferences",
+    version="6.1.0"
 )
 app.add_middleware(
     CORSMiddleware,
@@ -58,17 +60,38 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
     clean_tags = [str(tag).replace("_", " ").lower() for tag in tag_fields if tag]
     return " ".join(clean_tags)
 
-def generate_dynamic_destinations(locations: List[str]) -> pd.DataFrame:
-    return pd.DataFrame([
-        {
-            "id": f"stay22_{i+1}",
-            "name": f"Stay22 - {location.title()}",
-            "tags": f"{location} travel explore stay",
-            "booking_url": f"https://stay22.com/embed/{STAY22_LETMEALLEZ_ID}?location={location}",
-            "image_url": f"https://source.unsplash.com/featured/?{location},travel"
-        }
-        for i, location in enumerate(locations)
-    ])
+def extract_locations_from_preferences(preference: UserPreference) -> List[str]:
+    locations = preference.favorite_trip + preference.past_destinations + preference.least_favorite_trip + preference.interests + preference.travel_style + preference.accommodation
+    keywords = set([x.lower() for x in locations if isinstance(x, str) and len(x) > 2])
+    return list(keywords) or ["paris"]
+
+def fetch_airbnb_properties(city: str, limit: int = 10) -> pd.DataFrame:
+    url = f"https://{RAPIDAPI_HOST}/api/v1/searchPropertyByLocationV2"
+    querystring = {
+        "location": city,
+        "totalRecords": str(limit),
+        "currency": "USD",
+        "adults": "1"
+    }
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST
+    }
+    response = requests.get(url, headers=headers, params=querystring)
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Airbnb API request failed for {city}")
+
+    results = []
+    data = response.json().get("data", [])
+    for i, item in enumerate(data):
+        results.append({
+            "id": f"airbnb_{city}_{i+1}",
+            "name": item.get("listingName", f"Airbnb stay in {city} #{i+1}"),
+            "tags": f"{city} travel explore stay",
+            "booking_url": item.get("detailPageUrl", ""),
+            "image_url": item.get("optimizedThumbUrls", {}).get("srpDesktop")
+        })
+    return pd.DataFrame(results)
 
 def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 5):
     tfidf = TfidfVectorizer()
@@ -82,16 +105,26 @@ def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
     tags = convert_preferences_to_tags(preference)
     print("🎯 Tags:", tags)
 
-    # Use common city keywords for simplicity, can be replaced with dynamic input in production
-    fallback_locations = ["paris", "berlin", "rome", "vienna", "barcelona", "london", "amsterdam", "prague"]
-    destinations = generate_dynamic_destinations(fallback_locations)
+    user_locations = extract_locations_from_preferences(preference)
+    print("🌐 Locations to fetch:", user_locations)
 
-    print("🔀 Scoring dynamic Stay22 destinations...")
-    content_scores = recommend_content_based(tags, destinations)
+    all_data = pd.DataFrame()
+    for city in user_locations:
+        try:
+            city_data = fetch_airbnb_properties(city)
+            all_data = pd.concat([all_data, city_data], ignore_index=True)
+        except Exception as e:
+            print(f"⚠️ Failed to fetch for {city}:", e)
+
+    if all_data.empty:
+        raise HTTPException(status_code=404, detail="No destinations found based on preferences.")
+
+    print("🔀 Scoring Airbnb listings...")
+    content_scores = recommend_content_based(tags, all_data)
     top_indices = content_scores.sort_values(ascending=False).head(top_n).index
     print("🏆 Final recommendations ready!")
 
-    return destinations.loc[top_indices].to_dict(orient="records")
+    return all_data.loc[top_indices].to_dict(orient="records")
 
 @app.post("/recommend", response_model=List[Destination])
 def get_recommendations(preference: UserPreference):
