@@ -60,32 +60,32 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
     clean_tags = [str(tag).replace("_", " ").lower() for tag in tag_fields if tag]
     return " ".join(clean_tags)
 
-user_to_geoapify_category = {
-    "adventure": "sport",  # ✅ general valid sport category
-    "beach/relaxation": "beach",
-    "food & culinary": "catering.restaurant",
-    "nature & hiking": "natural.forest,natural.mountain",
-    "theme parks": "entertainment.theme_park",
-    "cruise": "tourism.information",  # geoapify doesn’t have boat_rental
-    "festivals & events": "entertainment.activity_park",
-    "shopping": "commercial.shopping_mall",
-    "cultural & historical": "entertainment.culture,historic",
-    "arts & museums": "entertainment.culture",
-    "music & nightlife": "entertainment.nightclub",
-    "fitness & wellness": "sport.fitness.fitness_centre",
-    "literature & bookstores": "commercial.books",
-    "wildlife & safari": "natural.protected_area",
-    "sports & outdoor activities": "sport",
-    "hotel": "accommodation.hotel",
-    "villa": "accommodation.chalet",
-    "camping": "camping.camp_site",
-    "hostel": "accommodation.hostel",
-    "resort": "accommodation.hotel",
-    "flight": "airport",
-    "train": "public_transport.train",
-    "road trip": "rental.car"
-}
-
+def get_geoapify_categories(preference: UserPreference) -> str:
+    user_to_geoapify_category = {
+        "adventure": "sport",  # ✅ general valid sport category
+        "beach/relaxation": "beach",
+        "food & culinary": "catering.restaurant",
+        "nature & hiking": "natural.forest,natural.mountain",
+        "theme parks": "entertainment.theme_park",
+        "cruise": "tourism.information",  # geoapify doesn’t have boat_rental
+        "festivals & events": "entertainment.activity_park",
+        "shopping": "commercial.shopping_mall",
+        "cultural & historical": "entertainment.culture,historic",
+        "arts & museums": "entertainment.culture",
+        "music & nightlife": "entertainment.nightclub",
+        "fitness & wellness": "sport.fitness.fitness_centre",
+        "literature & bookstores": "commercial.books",
+        "wildlife & safari": "natural.protected_area",
+        "sports & outdoor activities": "sport",
+        "hotel": "accommodation.hotel",
+        "villa": "accommodation.chalet",
+        "camping": "camping.camp_site",
+        "hostel": "accommodation.hostel",
+        "resort": "accommodation.hotel",
+        "flight": "airport",
+        "train": "public_transport.train",
+        "road trip": "rental.car"
+    }
 
     selected_fields = preference.travel_style + preference.accommodation + preference.interests
     categories = set()
