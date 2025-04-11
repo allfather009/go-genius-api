@@ -105,7 +105,7 @@ def fetch_from_geoapify(preference: UserPreference, limit: int = 25) -> pd.DataF
 
     params = {
         "categories": category_str,
-        "filter": "rect:-74.2591,40.4774,-73.7002,40.9176",  # 🗽 NYC bbox
+        "filter": "rect:2.0,46.0,15.0,51.5",  # 🇪🇺 Central Europe (approx: France → Austria)
         "limit": limit,
         "apiKey": GEOAPIFY_API_KEY
     }
