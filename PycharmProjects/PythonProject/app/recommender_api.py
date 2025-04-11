@@ -6,22 +6,18 @@ from typing import List, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
-import numpy as np
-import requests
-from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 load_dotenv()
 
-GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY")
-AMADEUS_CLIENT_ID = os.environ.get("AMADEUS_CLIENT_ID")
-AMADEUS_CLIENT_SECRET = os.environ.get("AMADEUS_CLIENT_SECRET")
+STAY22_LETMEALLEZ_ID = os.getenv("STAY22_LETMEALLEZ_ID")
 
 app = FastAPI(
     title="GoGenius Travel Recommender API",
-    description="Recommends destinations using real-time data from Geoapify and Amadeus APIs based on user preferences",
-    version="3.1.0"
+    description="Recommends destinations using Stay22 embedded content and personalized preferences",
+    version="5.1.0"
 )
 app.add_middleware(
     CORSMiddleware,
@@ -49,6 +45,8 @@ class Destination(BaseModel):
     id: str
     name: str
     tags: str
+    booking_url: str
+    image_url: Optional[str] = None
 
 def convert_preferences_to_tags(pref: UserPreference) -> str:
     tag_fields = (
@@ -60,135 +58,40 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
     clean_tags = [str(tag).replace("_", " ").lower() for tag in tag_fields if tag]
     return " ".join(clean_tags)
 
-def get_geoapify_categories(preference: UserPreference) -> str:
-    user_to_geoapify_category = {
-        "adventure": "sport",  # ✅ general valid sport category
-        "beach/relaxation": "beach",
-        "food & culinary": "catering.restaurant",
-        "nature & hiking": "natural.forest,natural.mountain",
-        "theme parks": "entertainment.theme_park",
-        "cruise": "tourism.information",  # geoapify doesn’t have boat_rental
-        "festivals & events": "entertainment.activity_park",
-        "shopping": "commercial.shopping_mall",
-        "cultural & historical": "entertainment.culture,historic",
-        "arts & museums": "entertainment.culture",
-        "music & nightlife": "entertainment.nightclub",
-        "fitness & wellness": "sport.fitness.fitness_centre",
-        "literature & bookstores": "commercial.books",
-        "wildlife & safari": "natural.protected_area",
-        "sports & outdoor activities": "sport",
-        "hotel": "accommodation.hotel",
-        "villa": "accommodation.chalet",
-        "camping": "camping.camp_site",
-        "hostel": "accommodation.hostel",
-        "resort": "accommodation.hotel",
-        "flight": "airport",
-        "train": "public_transport.train",
-        "road trip": "rental.car"
-    }
+def generate_dynamic_destinations(locations: List[str]) -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            "id": f"stay22_{i+1}",
+            "name": f"Stay22 - {location.title()}",
+            "tags": f"{location} travel explore stay",
+            "booking_url": f"https://stay22.com/embed/{STAY22_LETMEALLEZ_ID}?location={location}",
+            "image_url": f"https://source.unsplash.com/featured/?{location},travel"
+        }
+        for i, location in enumerate(locations)
+    ])
 
-    selected_fields = preference.travel_style + preference.accommodation + preference.interests
-    categories = set()
-    for item in selected_fields:
-        mapped = user_to_geoapify_category.get(item.lower())
-        if mapped:
-            for cat in mapped.split(","):
-                categories.add(cat.strip())
-
-    if not categories:
-        return "tourism.attraction"
-    return ",".join(categories)
-
-def fetch_from_geoapify(preference: UserPreference, limit: int = 25) -> pd.DataFrame:
-    url = "https://api.geoapify.com/v2/places"
-    category_str = get_geoapify_categories(preference)
-
-    params = {
-        "categories": category_str,
-        "filter": "rect:2.0,46.0,15.0,51.5",  # 🇪🇺 Central Europe (approx: France → Austria)
-        "limit": limit,
-        "apiKey": GEOAPIFY_API_KEY
-    }
-
-    res = requests.get(url, params=params)
-    if res.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"Geoapify API request failed. {res.text}")
-
-    features = res.json().get("features", [])
-    data = []
-    for place in features:
-        props = place.get("properties", {})
-        if props.get("name"):
-            data.append({
-                "id": props.get("place_id", "geo_" + str(len(data))),
-                "name": props["name"],
-                "tags": category_str
-            })
-    return pd.DataFrame(data)
-
-
-def fetch_from_amadeus(user_tags: str, limit: int = 25) -> pd.DataFrame:
-    token_url = "https://test.api.amadeus.com/v1/security/oauth2/token"
-    token_data = {
-        "grant_type": "client_credentials",
-        "client_id": AMADEUS_CLIENT_ID,
-        "client_secret": AMADEUS_CLIENT_SECRET
-    }
-    token_res = requests.post(token_url, data=token_data)
-    if token_res.status_code != 200:
-        raise HTTPException(status_code=500, detail="Amadeus token request failed.")
-
-    access_token = token_res.json().get("access_token")
-    search_url = "https://test.api.amadeus.com/v1/reference-data/locations"
-    params = {
-        "keyword": user_tags.split()[0],
-        "subType": "CITY",
-        "page[limit]": limit
-    }
-    headers = {"Authorization": f"Bearer {access_token}"}
-    res = requests.get(search_url, headers=headers, params=params)
-    if res.status_code != 200:
-        raise HTTPException(status_code=500, detail="Amadeus search failed.")
-
-    data = res.json().get("data", [])
-    results = []
-    for item in data:
-        if "name" in item["address"]:
-            results.append({
-                "id": item["id"],
-                "name": item["address"]["name"],
-                "tags": user_tags
-            })
-    return pd.DataFrame(results)
-
-def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 10):
+def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 5):
     tfidf = TfidfVectorizer()
     tfidf_matrix = tfidf.fit_transform(destinations["tags"])
     user_vector = tfidf.transform([user_tags])
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
     return pd.Series(sim_scores, index=destinations.index)
 
-def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
+def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
     print("✅ Converting preferences to tags...")
     tags = convert_preferences_to_tags(preference)
     print("🎯 Tags:", tags)
 
-    print("🌍 Fetching from Geoapify...")
-    geoapify_data = fetch_from_geoapify(preference)
-    print("📦 Geoapify results:", geoapify_data.shape)
+    # Use common city keywords for simplicity, can be replaced with dynamic input in production
+    fallback_locations = ["paris", "berlin", "rome", "vienna", "barcelona", "london", "amsterdam", "prague"]
+    destinations = generate_dynamic_destinations(fallback_locations)
 
-    print("✈️ Fetching from Amadeus...")
-    amadeus_data = fetch_from_amadeus(tags)
-    print("📦 Amadeus results:", amadeus_data.shape)
-
-    print("🔀 Combining and scoring...")
-    combined_data = pd.concat([geoapify_data, amadeus_data], ignore_index=True)
-    content_scores = recommend_content_based(tags, combined_data)
+    print("🔀 Scoring dynamic Stay22 destinations...")
+    content_scores = recommend_content_based(tags, destinations)
     top_indices = content_scores.sort_values(ascending=False).head(top_n).index
     print("🏆 Final recommendations ready!")
 
-    return combined_data.loc[top_indices].to_dict(orient="records")
-
+    return destinations.loc[top_indices].to_dict(orient="records")
 
 @app.post("/recommend", response_model=List[Destination])
 def get_recommendations(preference: UserPreference):
@@ -197,4 +100,3 @@ def get_recommendations(preference: UserPreference):
     except Exception as e:
         print("💥 Error:", e)
         raise HTTPException(status_code=500, detail=str(e))
-
