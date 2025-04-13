@@ -82,7 +82,7 @@ def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
             })
     return pd.DataFrame(data)
 
-def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 5):
+def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 10):
     tfidf = TfidfVectorizer()
     tfidf_matrix = tfidf.fit_transform(destinations["tags"])
     user_vector = tfidf.transform([user_tags])
@@ -107,7 +107,7 @@ def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: i
 
     return pd.Series(sim_scores, index=destinations.index)
 
-def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
+def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
     tags = convert_preferences_to_tags(preference)
     geoapify_data = fetch_from_geoapify(tags)
     combined_data = geoapify_data
