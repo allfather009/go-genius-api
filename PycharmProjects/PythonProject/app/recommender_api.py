@@ -86,9 +86,13 @@ def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: i
     tfidf = TfidfVectorizer()
     tfidf_matrix = tfidf.fit_transform(destinations["tags"])
     user_vector = tfidf.transform([user_tags])
+
+    print("\n📊 [TF-IDF Matrix Shape]:", tfidf_matrix.shape)
+    print("\n🧠 [User Vector]:", user_vector.toarray())
+
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
 
-    print("\n[🔎 Content-Based Scores]")
+    print("\n📈 [Cosine Similarity Scores]")
     for i, score in enumerate(sim_scores):
         print(f"{destinations.iloc[i]['name']} → Score: {score:.4f}")
 
@@ -97,17 +101,20 @@ def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: i
 def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
     tags = convert_preferences_to_tags(preference)
     geoapify_data = fetch_from_geoapify(tags)
-    combined_data = geoapify_data  # Only use Geoapify
+    combined_data = geoapify_data
 
     print(f"\n📦 [Hybrid] Total destinations: {len(combined_data)}")
+    print(f"📌 [User Tags]: {tags}\n")
+    print("🔍 [Destination Tags]:")
+    print(combined_data[['name', 'tags']])
 
     content_scores = recommend_content_based(tags, combined_data)
     top_indices = content_scores.sort_values(ascending=False).head(top_n).index
     top_results = combined_data.loc[top_indices]
 
-    print("\n🏆 [Top Recommendations]")
+    print("\n🏆 [Top Recommendations Based on Hybrid Algorithm]")
     for _, row in top_results.iterrows():
-        print(f"{row['name']} (ID: {row['id']})")
+        print(f"{row['name']} (ID: {row['id']}) → Tags: {row['tags']}")
 
     return top_results.to_dict(orient="records")
 
