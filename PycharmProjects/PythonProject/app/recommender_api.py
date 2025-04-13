@@ -6,20 +6,20 @@ from typing import List, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
-import os
+import numpy as np
 import requests
-from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import os
+from fastapi.middleware.cors import CORSMiddleware
 
-load_dotenv()
+load_dotenv()  # ✅ This loads from .env file
 
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-RAPIDAPI_HOST = "airbnb19.p.rapidapi.com"
+GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY")
 
 app = FastAPI(
     title="GoGenius Travel Recommender API",
-    description="Recommends destinations using RapidAPI Airbnb data and personalized preferences",
-    version="6.1.0"
+    description="Recommends destinations using real-time data from Geoapify API based on user preferences",
+    version="3.1.0"
 )
 app.add_middleware(
     CORSMiddleware,
@@ -47,89 +47,74 @@ class Destination(BaseModel):
     id: str
     name: str
     tags: str
-    booking_url: str
-    image_url: Optional[str] = None
 
 def convert_preferences_to_tags(pref: UserPreference) -> str:
     tag_fields = (
-        pref.travel_style + [pref.duration, pref.budget, pref.climate] +
-        pref.companions + pref.past_destinations +
-        pref.favorite_trip + pref.least_favorite_trip +
-        pref.transport + pref.accommodation + pref.interests
+            pref.travel_style + [pref.duration, pref.budget, pref.climate] +
+            pref.companions + pref.past_destinations +
+            pref.favorite_trip + pref.least_favorite_trip +
+            pref.transport + pref.accommodation + pref.interests
     )
     clean_tags = [str(tag).replace("_", " ").lower() for tag in tag_fields if tag]
     return " ".join(clean_tags)
 
-def extract_locations_from_preferences(preference: UserPreference) -> List[str]:
-    locations = preference.favorite_trip + preference.past_destinations + preference.least_favorite_trip + preference.interests + preference.travel_style + preference.accommodation
-    keywords = set([x.lower() for x in locations if isinstance(x, str) and len(x) > 2])
-    return list(keywords) or ["paris"]
-
-def fetch_airbnb_properties(city: str, limit: int = 10) -> pd.DataFrame:
-    url = f"https://{RAPIDAPI_HOST}/api/v1/searchPropertyByLocationV2"
-    querystring = {
-        "location": city,
-        "totalRecords": str(limit),
-        "currency": "USD",
-        "adults": "1"
+def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
+    url = "https://api.geoapify.com/v2/places"
+    params = {
+        "categories": "entertainment.culture,tourism.attraction,accommodation.hotel",
+        "filter": "rect:-74.2591,40.4774,-73.7002,40.9176",
+        "limit": limit,
+        "apiKey": GEOAPIFY_API_KEY
     }
-    headers = {
-        "x-rapidapi-key": RAPIDAPI_KEY,
-        "x-rapidapi-host": RAPIDAPI_HOST
-    }
-    response = requests.get(url, headers=headers, params=querystring)
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"Airbnb API request failed for {city}")
+    res = requests.get(url, params=params)
+    if res.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"Geoapify API request failed. {res.text}")
 
-    results = []
-    data = response.json().get("data", [])
-    for i, item in enumerate(data):
-        results.append({
-            "id": f"airbnb_{city}_{i+1}",
-            "name": item.get("listingName", f"Airbnb stay in {city} #{i+1}"),
-            "tags": f"{city} travel explore stay",
-            "booking_url": item.get("detailPageUrl", ""),
-            "image_url": item.get("optimizedThumbUrls", {}).get("srpDesktop")
-        })
-    return pd.DataFrame(results)
+    features = res.json().get("features", [])
+    data = []
+    for place in features:
+        props = place.get("properties", {})
+        if props.get("name"):
+            data.append({
+                "id": props.get("place_id", "geo_" + str(len(data))),
+                "name": props["name"],
+                "tags": user_tags
+            })
+    return pd.DataFrame(data)
 
 def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 5):
     tfidf = TfidfVectorizer()
     tfidf_matrix = tfidf.fit_transform(destinations["tags"])
     user_vector = tfidf.transform([user_tags])
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
+
+    print("\n[🔎 Content-Based Scores]")
+    for i, score in enumerate(sim_scores):
+        print(f"{destinations.iloc[i]['name']} → Score: {score:.4f}")
+
     return pd.Series(sim_scores, index=destinations.index)
 
 def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
-    print("✅ Converting preferences to tags...")
     tags = convert_preferences_to_tags(preference)
-    print("🎯 Tags:", tags)
+    geoapify_data = fetch_from_geoapify(tags)
+    combined_data = geoapify_data  # Only use Geoapify
 
-    user_locations = extract_locations_from_preferences(preference)
-    print("🌐 Locations to fetch:", user_locations)
+    print(f"\n📦 [Hybrid] Total destinations: {len(combined_data)}")
 
-    all_data = pd.DataFrame()
-    for city in user_locations:
-        try:
-            city_data = fetch_airbnb_properties(city)
-            all_data = pd.concat([all_data, city_data], ignore_index=True)
-        except Exception as e:
-            print(f"⚠️ Failed to fetch for {city}:", e)
-
-    if all_data.empty:
-        raise HTTPException(status_code=404, detail="No destinations found based on preferences.")
-
-    print("🔀 Scoring Airbnb listings...")
-    content_scores = recommend_content_based(tags, all_data)
+    content_scores = recommend_content_based(tags, combined_data)
     top_indices = content_scores.sort_values(ascending=False).head(top_n).index
-    print("🏆 Final recommendations ready!")
+    top_results = combined_data.loc[top_indices]
 
-    return all_data.loc[top_indices].to_dict(orient="records")
+    print("\n🏆 [Top Recommendations]")
+    for _, row in top_results.iterrows():
+        print(f"{row['name']} (ID: {row['id']})")
+
+    return top_results.to_dict(orient="records")
 
 @app.post("/recommend", response_model=List[Destination])
 def get_recommendations(preference: UserPreference):
-    try:
-        return hybrid_recommendation(preference)
-    except Exception as e:
-        print("💥 Error:", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """
+    Receives user preferences and returns best matching destinations.
+    Uses data from Geoapify API only.
+    """
+    return hybrid_recommendation(preference)
