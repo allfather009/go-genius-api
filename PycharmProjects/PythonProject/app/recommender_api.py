@@ -96,6 +96,15 @@ def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: i
     for i, score in enumerate(sim_scores):
         print(f"{destinations.iloc[i]['name']} → Score: {score:.4f}")
 
+    # Print TF-IDF values per place for comparison
+    feature_names = tfidf.get_feature_names_out()
+    print("\n📋 [TF-IDF Weights Per Destination]")
+    for i, row in enumerate(tfidf_matrix.toarray()):
+        print(f"{destinations.iloc[i]['name']}: ")
+        weights = {feature_names[j]: row[j] for j in range(len(row)) if row[j] > 0}
+        for word, val in sorted(weights.items(), key=lambda item: item[1], reverse=True):
+            print(f"   {word}: {val:.4f}")
+
     return pd.Series(sim_scores, index=destinations.index)
 
 def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
