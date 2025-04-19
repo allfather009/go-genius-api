@@ -29,7 +29,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,7 +58,6 @@ class Destination(BaseModel):
     rating: Optional[str] = None
     budget_range: Optional[str] = None
 
-
 def convert_preferences_to_tags(pref: UserPreference) -> str:
     tag_fields = (
             pref.travel_style + [pref.duration, pref.budget, pref.climate] +
@@ -72,10 +71,11 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
 def fetch_destinations_from_supabase() -> pd.DataFrame:
     response = supabase.table("destinations").select("*").execute()
     data = response.data
-    print("📥 Raw data from Supabase:", data)
+    print("🗕️ Raw data from Supabase:", data)
     if not data:
         raise HTTPException(status_code=404, detail="No destinations found in Supabase.")
     df = pd.DataFrame(data)
+    df["images"] = df["images"].fillna("https://byunlkvjaiskurdmwese.supabase.co/storage/v1/object/sign/images/ChatGPT%20Image%20Apr%2018,%202025,%2010_59_37%20PM.png?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1cmwiOiJpbWFnZXMvQ2hhdEdQVCBJbWFnZSBBcHIgMTgsIDIwMjUsIDEwXzU5XzM3IFBNLnBuZyIsImlhdCI6MTc0NTEwMjAzNCwiZXhwIjoxNzc2NjM4MDM0fQ.DrjYobr3x3mj03aoPps4yPL1yYUmgNiK-YPkRaccVDM")
     df["tags"] = (
         df["style"].fillna("") + " " +
         df["climate"].fillna("") + " " +
@@ -84,7 +84,7 @@ def fetch_destinations_from_supabase() -> pd.DataFrame:
         df["interests_activities"].fillna("") + " " +
         df["budget_range"].fillna("")
     ).str.lower()
-    return df[["id", "name", "tags"]]
+    return df[["id", "name", "tags", "images", "description", "rating", "budget_range"]]
 
 def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 10):
     tfidf = TfidfVectorizer()
