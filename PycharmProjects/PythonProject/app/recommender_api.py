@@ -53,6 +53,11 @@ class Destination(BaseModel):
     id: str
     name: str
     tags: str
+    images: str
+    description: Optional[str] = None
+    rating: Optional[str] = None
+    budget_range: Optional[str] = None
+
 
 def convert_preferences_to_tags(pref: UserPreference) -> str:
     tag_fields = (
