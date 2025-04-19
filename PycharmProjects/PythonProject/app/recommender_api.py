@@ -7,19 +7,25 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 import numpy as np
-import requests
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+from supabase import create_client, Client
 from fastapi.middleware.cors import CORSMiddleware
+import traceback
+from surprise import SVD, Dataset, Reader
+from surprise.model_selection import train_test_split
+from surprise import accuracy
 
-load_dotenv()  # ✅ This loads from .env file
+load_dotenv()
 
-GEOAPIFY_API_KEY = os.environ.get("GEOAPIFY_API_KEY")
+SUPABASE_URL = "https://byunlkvjaiskurdmwese.supabase.co"
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(
     title="GoGenius Travel Recommender API",
-    description="Recommends destinations using real-time data from Geoapify API based on user preferences",
-    version="3.1.0"
+    description="Recommends destinations using Supabase data based on user preferences",
+    version="4.1.0"
 )
 app.add_middleware(
     CORSMiddleware,
@@ -58,79 +64,76 @@ def convert_preferences_to_tags(pref: UserPreference) -> str:
     clean_tags = [str(tag).replace("_", " ").lower() for tag in tag_fields if tag]
     return " ".join(clean_tags)
 
-def fetch_from_geoapify(user_tags: str, limit: int = 25) -> pd.DataFrame:
-    url = "https://api.geoapify.com/v2/places"
-    params = {
-        "categories": "entertainment.culture,tourism.attraction,accommodation.hotel",
-        "filter": "rect:-74.2591,40.4774,-73.7002,40.9176",
-        "limit": limit,
-        "apiKey": GEOAPIFY_API_KEY
-    }
-    res = requests.get(url, params=params)
-    if res.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"Geoapify API request failed. {res.text}")
-
-    features = res.json().get("features", [])
-    data = []
-    for place in features:
-        props = place.get("properties", {})
-        if props.get("name"):
-            data.append({
-                "id": props.get("place_id", "geo_" + str(len(data))),
-                "name": props["name"],
-                "tags": user_tags
-            })
-    return pd.DataFrame(data)
+def fetch_destinations_from_supabase() -> pd.DataFrame:
+    response = supabase.table("destinations").select("*").execute()
+    data = response.data
+    print("📥 Raw data from Supabase:", data)
+    if not data:
+        raise HTTPException(status_code=404, detail="No destinations found in Supabase.")
+    df = pd.DataFrame(data)
+    df["tags"] = (
+        df["style"].fillna("") + " " +
+        df["climate"].fillna("") + " " +
+        df["transport_options"].fillna("") + " " +
+        df["accommodation_type"].fillna("") + " " +
+        df["interests_activities"].fillna("") + " " +
+        df["budget_range"].fillna("")
+    ).str.lower()
+    return df[["id", "name", "tags"]]
 
 def recommend_content_based(user_tags: str, destinations: pd.DataFrame, top_n: int = 10):
     tfidf = TfidfVectorizer()
     tfidf_matrix = tfidf.fit_transform(destinations["tags"])
     user_vector = tfidf.transform([user_tags])
 
-    print("\n📊 [TF-IDF Matrix Shape]:", tfidf_matrix.shape)
-    print("\n🧠 [User Vector]:", user_vector.toarray())
-
     sim_scores = cosine_similarity(user_vector, tfidf_matrix).flatten()
-
-    print("\n📈 [Cosine Similarity Scores]")
-    for i, score in enumerate(sim_scores):
-        print(f"{destinations.iloc[i]['name']} → Score: {score:.4f}")
-
-    # Print TF-IDF values per place for comparison
-    feature_names = tfidf.get_feature_names_out()
-    print("\n📋 [TF-IDF Weights Per Destination]")
-    for i, row in enumerate(tfidf_matrix.toarray()):
-        print(f"{destinations.iloc[i]['name']}: ")
-        weights = {feature_names[j]: row[j] for j in range(len(row)) if row[j] > 0}
-        for word, val in sorted(weights.items(), key=lambda item: item[1], reverse=True):
-            print(f"   {word}: {val:.4f}")
-
     return pd.Series(sim_scores, index=destinations.index)
+
+def recommend_collaborative(user_id: str, destinations: pd.DataFrame, top_n: int = 10):
+    try:
+        rating_response = supabase.table("ratings").select("*").execute()
+        ratings_data = pd.DataFrame(rating_response.data)
+        if ratings_data.empty:
+            return pd.Series([0.0] * len(destinations), index=destinations.index)
+
+        reader = Reader(rating_scale=(1, 5))
+        data = Dataset.load_from_df(ratings_data[["user_id", "destination_id", "rating"]], reader)
+        trainset = data.build_full_trainset()
+        model = SVD()
+        model.fit(trainset)
+
+        predictions = []
+        for idx, row in destinations.iterrows():
+            pred = model.predict(user_id, str(row["id"])).est
+            predictions.append(pred)
+
+        return pd.Series(predictions, index=destinations.index)
+    except Exception as e:
+        print("⚠️ Collaborative filtering failed:", e)
+        return pd.Series([0.0] * len(destinations), index=destinations.index)
 
 def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
     tags = convert_preferences_to_tags(preference)
-    geoapify_data = fetch_from_geoapify(tags)
-    combined_data = geoapify_data
+    destinations_data = fetch_destinations_from_supabase()
 
-    print(f"\n📦 [Hybrid] Total destinations: {len(combined_data)}")
+    print(f"\n📦 [Hybrid] Total destinations: {len(destinations_data)}")
     print(f"📌 [User Tags]: {tags}\n")
-    print("🔍 [Destination Tags]:")
-    print(combined_data[['name', 'tags']])
 
-    content_scores = recommend_content_based(tags, combined_data)
-    top_indices = content_scores.sort_values(ascending=False).head(top_n).index
-    top_results = combined_data.loc[top_indices]
+    content_scores = recommend_content_based(tags, destinations_data)
+    collab_scores = recommend_collaborative(preference.user_id, destinations_data)
 
-    print("\n🏆 [Top Recommendations Based on Hybrid Algorithm]")
-    for _, row in top_results.iterrows():
-        print(f"{row['name']} (ID: {row['id']}) → Tags: {row['tags']}")
+    final_scores = (0.6 * content_scores) + (0.4 * collab_scores)
+    top_indices = final_scores.sort_values(ascending=False).head(top_n).index
+    top_results = destinations_data.loc[top_indices]
+    top_results["id"] = top_results["id"].astype(str)
 
     return top_results.to_dict(orient="records")
 
 @app.post("/recommend", response_model=List[Destination])
 def get_recommendations(preference: UserPreference):
-    """
-    Receives user preferences and returns best matching destinations.
-    Uses data from Geoapify API only.
-    """
-    return hybrid_recommendation(preference)
+    try:
+        return hybrid_recommendation(preference)
+    except Exception as e:
+        print("❌ INTERNAL ERROR:", e)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Something went wrong. Check logs.")
