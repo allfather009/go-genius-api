@@ -159,7 +159,19 @@ def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
     destinations_data['cf_score'] = cf_scores
     destinations_data['hybrid_score'] = final_scores
     top_df = destinations_data.sort_values("hybrid_score", ascending=False).head(top_n)
-    return top_df[['id', 'name', 'cbf_score', 'cf_score', 'hybrid_score']].to_dict(orient="records")
+    # Select all relevant columns for frontend (add/remove as needed)
+    return top_df[[
+        'id',
+        'name',
+        'images',
+        'description',
+        'rating',
+        'budget_range',
+        'cbf_score',
+        'cf_score',
+        'hybrid_score'
+    ]].to_dict(orient="records")
+
 
 # ========== ENDPOINTS ==========
 
