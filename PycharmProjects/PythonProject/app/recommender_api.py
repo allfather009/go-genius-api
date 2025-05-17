@@ -144,22 +144,25 @@ def recommend_collaborative(user_id: str, destinations: pd.DataFrame):
         print("⚠️ Collaborative filtering failed:", e)
         return pd.Series([0.0] * len(destinations), index=destinations.index)
 
-def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
+def hybrid_recommendation(preference: UserPreference, top_n: int = 5):
     """
-    Hybrid: Weighted average of CBF and CF. Returns top_n recommendations.
+    Hybrid recommendation (weighted average of CBF and CF).
+    Returns top_n recommendations with all destination data needed for frontend.
     """
     tags = convert_preferences_to_tags(preference)
     destinations_data = fetch_destinations_from_supabase()
-    cbf_scores = recommend_content_based(tags, destinations_data)
-    cf_scores = recommend_collaborative(preference.user_id, destinations_data)
+    print(f"\n📦 [Hybrid] Total destinations: {len(destinations_data)}")
+    print(f"📌 [User Tags]: {tags}\n")
+    content_scores = recommend_content_based(tags, destinations_data)
+    collab_scores = recommend_collaborative(preference.user_id, destinations_data)
     # Weighted sum: 60% CBF, 40% CF
-    final_scores = (0.6 * cbf_scores) + (0.4 * cf_scores)
+    final_scores = (0.6 * content_scores) + (0.4 * collab_scores)
     destinations_data = destinations_data.copy()
-    destinations_data['cbf_score'] = cbf_scores
-    destinations_data['cf_score'] = cf_scores
+    destinations_data['cbf_score'] = content_scores
+    destinations_data['cf_score'] = collab_scores
     destinations_data['hybrid_score'] = final_scores
     top_df = destinations_data.sort_values("hybrid_score", ascending=False).head(top_n)
-    # Select all relevant columns for frontend (add/remove as needed)
+    # Now return all fields needed by frontend:
     return top_df[[
         'id',
         'name',
@@ -171,6 +174,7 @@ def hybrid_recommendation(preference: UserPreference, top_n: int = 10):
         'cf_score',
         'hybrid_score'
     ]].to_dict(orient="records")
+
 
 
 # ========== ENDPOINTS ==========
