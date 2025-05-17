@@ -59,13 +59,18 @@ class UserPreference(BaseModel):
 
 class RecommendationResult(BaseModel):
     """
-    Output model for a recommended destination.
-    """
+        Output model for a recommended destination.
+        """
     id: str
     name: str
+    images: Optional[str] = None
+    description: Optional[str] = None
+    rating: Optional[float] = None
+    budget_range: Optional[str] = None
     cbf_score: float
     cf_score: float
     hybrid_score: float
+
 
 # ========== HELPER FUNCTIONS ==========
 
